@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 AUDIO_EXTS = (".wav", ".mp3", ".flac", ".m4a", ".ogg", ".aac", ".webm", ".opus")
 PCM16_MAX = 32767.0
-VOICE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+VOICE_NAME_PATTERN = re.compile(r'^[^\s<>:"/\\|?*.][^<>:"/\\|?*]{0,63}$')
 MAX_VOICE_BYTES = 20 * 1024 * 1024
 
 
@@ -126,11 +126,22 @@ class TTSService:
         if os.path.isdir(self.voices_dir):
             for name in sorted(os.listdir(self.voices_dir)):
                 base, ext = os.path.splitext(name)
-                if ext.lower() in AUDIO_EXTS:
-                    voices.append({
-                        "id": base,
-                        "path": os.path.join(self.voices_dir, name),
-                    })
+                if ext.lower() not in AUDIO_EXTS:
+                    continue
+                path = os.path.join(self.voices_dir, name)
+                try:
+                    created_at = int(os.path.getmtime(path))
+                except OSError:
+                    created_at = 0
+                # Shaped like OpenAI's voice object; extra keys are ignored by SDK clients.
+                voices.append({
+                    "id": base,
+                    "name": base,
+                    "object": "audio.voice",
+                    "type": "audio_sample",
+                    "created_at": created_at,
+                    "path": path,
+                })
         return voices
 
     def resolve_voice(self, voice: str) -> str:
@@ -168,9 +179,13 @@ class TTSService:
         """
         if not VOICE_NAME_PATTERN.match(name or ""):
             raise ValueError(
-                "voice name must be 1-64 chars of letters, digits, '_', '-' or '.' "
-                "(it is used as a file name)"
+                "voice name must be 1-64 characters and cannot contain "
+                '< > : " / \\ | ? * , nor start with "." or whitespace, '
+                "nor end with '.' or ' ' (it is used as a file name)"
             )
+        name = name.strip()
+        if name != name.rstrip(" ."):
+            raise ValueError("voice name must not end with '.' or ' '")
         ext = (ext or "").lower()
         if ext not in AUDIO_EXTS:
             raise ValueError(f"unsupported audio extension '{ext}', expected one of {', '.join(AUDIO_EXTS)}")
@@ -203,6 +218,7 @@ class TTSService:
             "id": name,
             "path": os.path.relpath(path),
             "duration_seconds": round(duration, 2),
+            "created_at": int(os.path.getmtime(path)),
         }
 
     def delete_voice(self, voice_id: str) -> List[str]:

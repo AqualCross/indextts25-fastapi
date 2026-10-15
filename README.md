@@ -9,9 +9,11 @@ and get a production-friendly HTTP service.
 
 ```
 ✅ OpenAI-compatible POST /v1/audio/speech (works with the OpenAI SDK)
+✅ OpenAI "custom voices" compatible: POST /v1/audio/voices (audio_sample + name
+   + consent) returns an audio.voice object; reuse its id in /v1/audio/speech
 ✅ True streaming: bytes flow while later text segments are still generating
    (`stream: true`) + a base64-PCM16 SSE endpoint
-✅ Voice management over HTTP: upload / list / delete reference voices
+✅ Voice management over HTTP: create / list / delete reference voices
 ✅ Full IndexTTS-2.5 controls: lang, emotion vector / emotion text / emotion
    audio, duration_factor, pronunciation annotations, sampling knobs
 ✅ mp3 / wav / ogg (ffmpeg) and raw PCM output, speed / gain / sample_rate
@@ -75,8 +77,9 @@ the auxiliary models into `checkpoints/hf_cache/`).
 | --- | --- | --- |
 | GET | `/health` | model status, device, VRAM (current + peak) |
 | GET | `/v1/models` | OpenAI-compatible model list |
-| GET | `/v1/voices` (alias `/v1/audio/voices`) | list voices |
-| POST | `/v1/voices` | upload a voice (`file` + `name` [+ `consent`]), ffprobe-validated, ≤ 20 MiB |
+| GET | `/v1/voices` (alias `/v1/audio/voices`) | list voices (OpenAI voice objects) |
+| POST | `/v1/audio/voices` | **create a voice, OpenAI "custom voices" compatible**: multipart `audio_sample` + `name` [+ `consent` (accepted, not enforced)], ffprobe-validated, ≤ 20 MiB — returns `{id, created_at, name, object:"audio.voice", type:"audio_sample"}` |
+| POST | `/v1/voices` | alias of the above (also accepts the legacy field name `file`) |
 | DELETE | `/v1/voices/{voice_id}` | delete a voice |
 | POST | `/v1/audio/speech` | synthesize (`stream: true` = progressive audio) |
 | POST | `/v1/audio/speech/stream` | SSE: `start` / `audio` (base64 PCM16) / `done` / `error` |
@@ -121,11 +124,22 @@ curl -X DELETE http://127.0.0.1:8000/v1/voices/my_voice
 ```
 
 ```python
-# OpenAI SDK — drop-in
+# OpenAI SDK — drop-in for speech, and "custom voices" for voice creation
 from openai import OpenAI
 client = OpenAI(base_url="http://127.0.0.1:8000/v1", api_key="not-needed")
+
+# speech with a built-in/existing voice
 client.audio.speech.create(model="IndexTTS-2.5", voice="voice_01",
                            input="Hello from IndexTTS 2.5!").stream_to_file("out.mp3")
+
+# create a custom voice from a reference recording, then reuse its id
+voice = client.audio.voices.create(
+    audio_sample=open("reference.wav", "rb"),
+    consent="cons_local",          # accepted & logged; not enforced by this server
+    name="my_voice",               # the id is the file name on disk
+)
+client.audio.speech.create(model="IndexTTS-2.5", voice=voice.id,
+                           input="你好，这是自定义音色。").stream_to_file("out2.mp3")
 
 # streaming: consume bytes while the rest is still generating
 import requests
@@ -174,6 +188,13 @@ cache after each request (not a leak) — watch `GET /health` → `vram`.
 
 ## Notes
 
+- Voices are OpenAI **custom voices** compatible: `POST /v1/audio/voices` with
+  `audio_sample` / `name` / `consent` returns an `audio.voice` object, and its
+  `id` (= the file name on disk) is used in the speech `voice` field; the speech
+  endpoint also accepts the OpenAI object form `{"id": "..."}`. `consent` is
+  accepted and logged but not enforced (no consent-recording gate on this
+  server — the `/v1/audio/voice_consents` management endpoints are not
+  implemented; the Python SDK does not expose them as of openai 3.31 either).
 - One inference at a time per process (GPU lock); concurrent HTTP requests queue.
 - First request per voice re-encodes the reference audio (~3 s extra); repeating
   requests with the same voice reuse the cache.

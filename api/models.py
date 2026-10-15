@@ -7,7 +7,7 @@ IndexTTS-2.5 specific controls (language, emotion, duration factor, ...).
 
 from typing import List, Optional, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SpeechRequest(BaseModel):
@@ -20,7 +20,8 @@ class SpeechRequest(BaseModel):
         description=(
             "Voice identifier: a file name (without extension) inside the "
             "voices directory, e.g. 'alex' -> characters/alex.wav; an absolute "
-            "path to an audio file is also accepted."
+            "path to an audio file is also accepted. OpenAI-style objects such "
+            "as {\"id\": \"voice_123\"} are accepted as well."
         ),
     )
     response_format: Literal["mp3", "wav", "ogg", "pcm"] = Field(
@@ -95,6 +96,14 @@ class SpeechRequest(BaseModel):
             "over the flat fields."
         ),
     )
+
+    @field_validator("voice", mode="before")
+    @classmethod
+    def _unpack_openai_voice_object(cls, value):
+        """Accept OpenAI's object form, e.g. {"id": "voice_123"}."""
+        if isinstance(value, dict):
+            return value.get("id") or value.get("voice") or value.get("name") or ""
+        return value
     temperature: Optional[float] = Field(None, gt=0.0, le=2.0)
     top_p: Optional[float] = Field(None, gt=0.0, le=1.0)
     top_k: Optional[int] = Field(None, ge=1, le=200)

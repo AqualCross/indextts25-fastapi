@@ -6,7 +6,8 @@ csllpr/index-tts-fastapi, iamyb/indextts-api and the vLLM-Omni recipe):
     GET    /health                  - liveness + model status (incl. VRAM)
     GET    /v1/models               - OpenAI-compatible model list
     GET    /v1/voices               - list voices (alias: /v1/audio/voices)
-    POST   /v1/voices               - upload a reference audio as a voice
+    POST   /v1/audio/voices         - create a voice, OpenAI "custom voices" compatible
+    POST   /v1/voices               - alias of the above
     DELETE /v1/voices/{voice_id}    - delete a voice
     POST   /v1/audio/speech         - synthesize speech (stream=true => progressive audio)
     POST   /v1/audio/speech/stream  - synthesize speech as base64 PCM16 SSE events
@@ -20,6 +21,7 @@ import base64
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Iterator, Optional, Tuple
 
@@ -254,21 +256,50 @@ async def list_voices():
     return {"object": "list", "data": service.list_voices()}
 
 
+@app.post("/v1/audio/voices", dependencies=[Depends(verify_token)], status_code=status.HTTP_201_CREATED)
 @app.post("/v1/voices", dependencies=[Depends(verify_token)], status_code=status.HTTP_201_CREATED)
 async def upload_voice(
-    file: UploadFile = File(..., description="Reference audio (wav/mp3/flac/ogg/..., <= 20 MiB)"),
-    name: str = Form(..., description="Voice id used later in the 'voice' field (letters/digits/_/-)"),
-    consent: Optional[str] = Form(None, description="Optional consent declaration, logged server-side"),
+    name: str = Form(..., description="Voice name / identifier, reused later in the 'voice' field (1-64 chars)"),
+    audio_sample: Optional[UploadFile] = File(
+        None, description="Reference audio (OpenAI field name; wav/mp3/flac/ogg/..., <= 20 MiB)"
+    ),
+    file: Optional[UploadFile] = File(None, description="Alias of audio_sample (backwards compatibility)"),
+    consent: Optional[str] = Form(
+        None, description="OpenAI-style consent recording id (accepted and logged; not enforced on this server)"
+    ),
+    type_: Optional[str] = Form(
+        None, alias="type", description="Voice creation method; only 'audio_sample' / 'consent' are accepted"
+    ),
 ):
-    data = await file.read(MAX_VOICE_BYTES + 1)
-    ext = os.path.splitext(file.filename or "")[1].lower()
+    if type_ and type_ not in ("audio_sample", "consent"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="only type=audio_sample is supported (prompt-based voices are not implemented)",
+        )
+    upload = audio_sample or file
+    if upload is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="audio_sample (or its alias 'file') is required",
+        )
+    data = await upload.read(MAX_VOICE_BYTES + 1)
+    ext = os.path.splitext(upload.filename or "")[1].lower()
     try:
         info = await run_in_threadpool(service.save_voice, name, data, ext)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if consent:
-        logger.info("voice upload '%s' consent: %s", name, consent[:120])
-    return info
+        logger.info("voice '%s' created with consent id: %s", info["id"], consent[:120])
+    # OpenAI "custom voices" response shape; extra keys are ignored by SDK clients.
+    return {
+        "id": info["id"],
+        "created_at": info["created_at"],
+        "name": info["id"],
+        "object": "audio.voice",
+        "type": "audio_sample",
+        "path": info["path"],
+        "duration_seconds": info["duration_seconds"],
+    }
 
 
 @app.delete("/v1/voices/{voice_id}", dependencies=[Depends(verify_token)])
