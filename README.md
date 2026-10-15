@@ -202,6 +202,38 @@ cache after each request (not a leak) — watch `GET /health` → `vram`.
   weights stay resident.
 - `--qwen-emo` on an 8 GB card next to other GPU workloads can be tight.
 
+## Prior art & alternatives
+
+IndexTTS-2.5 API wrappers already exist — this project was built for a
+specific target (Windows-native, small-VRAM GPUs, BF16, `uv` workflow) where
+no drop-in option fit at the time. Depending on your environment, one of
+these may suit you better:
+
+- **Official: [vLLM-Omni recipe](https://recipes.vllm.ai/IndexTeam/IndexTTS-2.5)**
+  for IndexTTS-2.5 — OpenAI-compatible `/v1/audio/speech`, named voices,
+  streaming, batch serving. Linux + vLLM (nightly); each stage reserves GPU
+  memory and low-memory profiles are not validated.
+- **[iamyb/indextts-api](https://github.com/iamyb/indextts-api)** — thin
+  FastAPI wrapper for 2.5 with Docker/GHCR images, SSE streaming, voice
+  uploads and remote reference-audio URLs. Linux/Docker-first (README
+  recommends 12 GB+ VRAM).
+- **[ncoder-ai/indextts-fastapi](https://github.com/ncoder-ai/indextts-fastapi)**
+  — pip-installable wrapper targeting IndexTTS-2 v2.0.
+- **[csllpr/index-tts-fastapi](https://github.com/csllpr/index-tts-fastapi)**
+  — the request shape this project's speech endpoint follows; targets the
+  original IndexTTS v1.
+
+API-wise this project stays compatible with all of the above (`extra_params`,
+`audio_sample`/`consent`/`name` voice creation, OpenAI SDK). What it adds:
+
+- Runs natively on **Windows** (start scripts included) as well as Linux
+- **BF16 by default, practical on an 8 GB GPU** — official low-VRAM
+  auto-chunking is honored in streaming mode too
+- **True streaming** (first audio ≈ half the wait of non-streaming on long
+  texts) + SSE endpoint
+- OpenAI "custom voices" verified end-to-end with the official SDK 3.31
+- Live VRAM stats (current + peak) via `/health` for small-GPU operations
+
 ## License & acknowledgements
 
 The wrapper code in this repository is released under the [MIT License](LICENSE).
@@ -230,6 +262,8 @@ uv run indextts25-fastapi/run_api.py --gpu 0 --bf16 --port 8000   # 或 Windows 
   `/v1/audio/speech/stream`
 - 扩展参数：`lang`、`emo_vector`、`emo_text`、`emo_audio`、`duration_factor`、`num_beams` 等；
   另支持 `extra_params` 兼容层（iamyb / vLLM-Omni 风格请求体可直接用）
-- 音色：把参考音频放到 `characters/<名字>.wav`，或用 `POST /v1/voices` 上传
+- 音色：把参考音频放到 `characters/<名字>.wav`，或用 `POST /v1/audio/voices` 上传（OpenAI Custom Voices 兼容）
 - 8G 显存实测可用（BF16，low-VRAM 自动分段），RTX 3070 上 RTF ≈ 1.3–1.5，流式首段音频约为
   非流式的一半延迟
+- 生态与替代方案（官方 vLLM-Omni、iamyb/indextts-api 等）见上方 **Prior art & alternatives**；
+  本项目定位：Windows 原生 + 小显存 BF16 + 流程完整的双语言接口
