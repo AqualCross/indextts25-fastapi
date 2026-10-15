@@ -1,0 +1,8 @@
+{
+  "model": "IndexTTS-2.5",
+  "input": "Hello! This is IndexTTS 2.5 behind an OpenAI-compatible API.",
+  "voice": "voice_01",
+  "lang": "EN",
+  "response_format": "mp3",
+  "sample_rate": 24000
+}

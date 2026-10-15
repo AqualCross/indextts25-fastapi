@@ -1,0 +1,7 @@
+{
+  "input": "这是一段比较长的文本，用来演示真流式输出：第一段生成完成后，音频就会立即开始返回，而不必等待全部文本合成完毕。",
+  "voice": "voice_01",
+  "lang": "ZH",
+  "response_format": "mp3",
+  "stream": true
+}

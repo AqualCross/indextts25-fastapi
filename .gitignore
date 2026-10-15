@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.log
+.env
+.env.*
+
+# local runtime artifacts
+characters/
+checkpoints/
+outputs/
+tests/
+*.wav
+*.mp3
+*.ogg
+*.pcm
